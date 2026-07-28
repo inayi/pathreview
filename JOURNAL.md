@@ -46,3 +46,17 @@ Affected codebase areas: This change primarily impacts .github/workflows/ci.yml 
 **Setup confirmation:** [x] App runs locally at localhost:5173
 
 **Cohort ledger:** [x] Issue added to cohort ledger
+
+
+## Week 8 — Reproduction & solution planning
+
+**Reproduction commit link:** https://github.com/ascherj/pathreview/commit/57b17b04e4bc5468ff849352aeeedc6319d764d8
+
+**Reproduction summary:**
+Added an intentionally broken Alembic migration (`alembic/versions/003_broken_demo_migration.py`, which adds a column to a nonexistent table) and confirmed CI stays green because no job in `.github/workflows/ci.yml` runs `alembic upgrade head` or `alembic check` — proving CI currently lacks migration validation.
+
+**PLAN.md link:** https://github.com/inayi/pathreview/blob/feat/129-validate-database-migrations/PLAN.md
+
+**Walkthrough video (recommended):** [link to your Loom video, ≤2 min — recommended, not graded]
+
+**Blockers or open questions:**
