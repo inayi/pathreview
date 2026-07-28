@@ -1,91 +1,100 @@
-# PLAN.md — Issue #129: Add database migration validation to CI
+## Solution plan
 
-**Issue:** https://github.com/ascherj/pathreview/issues/129
-**Branch:** `feat/129-validate-database-migrations`
+**Issue:** Add a database migration validation step to CI that checks all migrations can be applied cleanly — https://github.com/ascherj/pathreview/issues/129
 
----
-
-## 1. Understand
-
-**Problem:** Database migrations are only verified manually before merging. The CI
-workflow has no way to automatically catch broken migrations or schema drift between
-Alembic migrations and the SQLAlchemy models.
+### Understand
 
 **Root cause:** `.github/workflows/ci.yml` defines five jobs — `lint`, `typecheck`,
 `test-unit`, `test-integration`, `frontend` — and **none of them ever runs
-`alembic upgrade head` or `alembic check`.** Migrations are never applied in CI, so:
+`alembic upgrade head` or `alembic check`.** Migrations are never applied in CI.
 
-- A **broken migration** (e.g. one that references a table/column that does not exist)
-  merges with all checks green.
-- **Schema drift** — a change in `core/models/` without a corresponding migration — is
-  never detected.
+**Expected vs. actual behavior:**
+- *Actual:* A broken migration (e.g. one referencing a table/column that does not exist)
+  or schema drift between `core/models/` and `alembic/versions/` merges with all checks
+  green. Migrations are only verified manually before merge.
+- *Expected:* CI provisions a fresh database, applies all migrations sequentially, and
+  fails if a migration errors or if the resulting schema does not match the SQLAlchemy
+  models.
 
-The pieces needed for validation already exist:
-- `alembic/env.py` sets `target_metadata = Base.metadata` (imported from `core.models`),
-  which is exactly what `alembic check` compares the live database against.
-- `alembic/env.py` builds an engine via `create_async_engine(settings.database_url)`, so
-  online migrations require an **async** driver URL (`postgresql+asyncpg://…`).
-- `pyproject.toml` pins `alembic>=1.13.0`, so `alembic check` (added in 1.9.0) is available.
+The building blocks for validation already exist: `alembic/env.py:24` sets the URL at
+runtime (`config.set_main_option("sqlalchemy.url", settings.database_url)`),
+`alembic/env.py:27` sets `target_metadata = Base.metadata` (imported from `core.models`) —
+exactly what `alembic check` compares the live database against — and `pyproject.toml`
+pins `alembic>=1.13.0`, so `alembic check` is available.
 
-Reproduction of the gap is committed as the intentionally broken migration
-`alembic/versions/003_broken_demo_migration.py` (see JOURNAL Week 8) — CI stays green
-despite it.
+### Map
 
-## 2. Map — files to create / modify
+Files/modules expected to be involved (with the specific lines/functions in play):
+- `scripts/validate_migrations.sh` — currently an empty placeholder; will hold the
+  validation logic (`alembic upgrade head` → `alembic check`).
+- `.github/workflows/ci.yml` — no alembic step exists today; the existing
+  `test-integration` job (lines 48–83) already models the Postgres service pattern to copy.
+  Add a new `validate-migrations` job with its own `postgres:16-alpine` service.
+- `alembic/env.py` — review only; already correct. `run_async_migrations()` (line 61) builds
+  the engine via `create_async_engine(settings.database_url)` (line 63), so the CI
+  `DATABASE_URL` must use the async driver `postgresql+asyncpg://…`; `target_metadata`
+  is set at line 27.
+- `core/config.py` — `database_url` default (line 11) is `postgresql+asyncpg://…`; the CI
+  env var overrides it.
+- `core/models/__init__.py` (re-exports `Base` + all four models) and `core/database.py:30`
+  (`Base = declarative_base()`) — the metadata `alembic check` validates against.
+- `Makefile` — has a `migrate:` target (`alembic upgrade head`, lines 63–64) but no
+  `validate-migrations`; optionally add one mirroring the script for local runs.
+- `alembic/versions/003_broken_demo_migration.py` — the reproduction migration; delete before
+  the real fix lands.
 
-- `scripts/validate_migrations.sh` **(create/implement)** — currently an empty placeholder.
-  Runs `alembic upgrade head` against a fresh DB, then `alembic check` to compare the
-  resulting schema to the models. Exits non-zero on any failure.
-- `.github/workflows/ci.yml` **(modify)** — add a `validate-migrations` job with a
-  `postgres:16-alpine` service (with a health-check) that installs deps and runs the script.
-- `alembic/env.py` **(review only — no change expected)** — already correct: async engine
-  plus `target_metadata = Base.metadata`.
-- `Makefile` **(optional)** — add a `validate-migrations` target mirroring the script for
-  local runs (the Makefile already has a `migrate` target).
-- `alembic/versions/003_broken_demo_migration.py` **(delete)** — remove the reproduction
-  migration before the real fix lands.
+### Plan
 
-## 3. Plan — concrete steps
-
-1. **Implement `scripts/validate_migrations.sh`.** Start with `set -euo pipefail`. Run
+1. **Implement `scripts/validate_migrations.sh`.** Begin with `set -euo pipefail`. Run
    `alembic upgrade head` to apply every migration to a fresh database, then run
-   `alembic check` to diff the live schema against `Base.metadata`. Any non-zero exit from
+   `alembic check` to diff the live schema against `Base.metadata`. A non-zero exit from
    either command fails the script.
-2. **Add the `validate-migrations` CI job** to `ci.yml`: a `postgres:16-alpine` service
+2. **Add a `validate-migrations` job to `ci.yml`** with a `postgres:16-alpine` service
    (user/password/db `pathreview`/`pathreview`/`pathreview_test`, port 5432, `pg_isready`
    health-check), `pip install -e ".[dev]"`, then `bash scripts/validate_migrations.sh`
-   with `DATABASE_URL=postgresql+asyncpg://pathreview:pathreview@localhost:5432/pathreview_test`
-   (async driver, matching `env.py`).
+   with `DATABASE_URL=postgresql+asyncpg://pathreview:pathreview@localhost:5432/pathreview_test`.
 3. **(Optional) Add a downgrade→upgrade round-trip** in the script to catch irreversible or
    asymmetric migrations.
-4. **Remove the demo `003_*` broken migration** so the new job passes on a clean history.
+4. **Remove the demo `003_broken_demo_migration.py`** so the new job passes on clean history.
 5. **(Optional) Mirror as a `Makefile` `validate-migrations` target** for local execution.
 
-## 4. Inputs & outputs
+### Inputs & outputs
 
 - **Inputs:** migration scripts in `alembic/versions/`; `Base.metadata` from `core.models`;
-  a fresh, empty PostgreSQL database provisioned by the CI service container.
-- **Outputs:** exit code **0** when all migrations apply cleanly and the resulting schema
-  matches the models; **non-zero** (failing the CI job) when a migration is broken or when
-  the schema drifts from the models.
+  a fresh, empty PostgreSQL database provisioned by the CI service container; the async
+  `DATABASE_URL` env var.
+- **Outputs / what changes:** a new CI job and an executable `scripts/validate_migrations.sh`.
+  The job exits **0** when all migrations apply cleanly and the schema matches the models,
+  and **non-zero** (failing CI) when a migration is broken or the schema drifts.
 
-## 5. Risks & unknowns
+**Definition of done (test specification):** the fix is complete when all of the following hold:
+1. Against a fresh DB with all valid migrations, `bash scripts/validate_migrations.sh` exits `0`
+   (both `alembic upgrade head` and `alembic check` succeed).
+2. With `alembic/versions/003_broken_demo_migration.py` present, the script exits non-zero
+   (`alembic upgrade head` raises on the nonexistent table) — this is the exact reproduction
+   case, so the script must catch what current CI misses.
+3. Adding a column to a model in `core/models/` without a matching migration makes the script
+   exit non-zero (`alembic check` reports the diff).
+4. The `validate-migrations` job appears in the GitHub Actions run and is red for cases 2–3,
+   green for case 1.
 
-- **Driver mismatch:** `env.py` uses `create_async_engine`, so the job must use
+### Risks & unknowns
+
+- **Driver mismatch** — `alembic/env.py` uses `create_async_engine`, so the job must use
   `postgresql+asyncpg://…`, unlike the existing `test-integration` job's sync
-  `postgresql://…` URL.
-- **Service health-check timing:** the migration step must wait for Postgres to be ready
-  (health-check retries) to avoid connection-refused flakes.
-- **`alembic check` false positives:** dialect-specific defaults, server-side defaults, or
-  type normalization can surface as spurious diffs and may need tuning of comparison options.
-- **Postgres-only schema:** models use `postgresql.UUID`/`JSON`, so there is no SQLite
-  fallback — validation always requires a real Postgres service.
+  `postgresql://…` URL. Wrong driver = connection failure.
+- **Service health-check timing** — the migration step must wait for the Postgres service in
+  `ci.yml` to be ready (health-check retries) to avoid connection-refused flakes.
+- **`alembic check` false positives** — dialect defaults, server-side defaults, or type
+  normalization in `alembic/env.py`'s comparison can surface spurious diffs; may need
+  `compare_type` / `compare_server_default` tuning in `env.py`'s `context.configure`.
+- **Postgres-only schema** — models use `postgresql.UUID`/`JSON` (see `core/models/`), so
+  there is no SQLite fallback; validation always requires a real Postgres service.
 
-## 6. Edge cases
+### Edge cases
 
 - **No new migrations:** the job still runs `upgrade head` + `check` and passes as a no-op.
 - **Model change without a migration:** `alembic check` exits non-zero — drift is caught.
-- **Broken migration:** `alembic upgrade head` raises — the job fails (the exact case #129
-  targets).
+- **Broken migration:** `alembic upgrade head` raises — the job fails (the case #129 targets).
 - **Multiple heads / branched revisions:** `alembic upgrade head` errors on ambiguous heads,
   correctly failing CI.
