@@ -1,4 +1,4 @@
-.PHONY: setup run test-unit test-integration test-all lint format typecheck check migrate seed reset-db eval clean
+.PHONY: setup run test-unit test-integration test-all lint format typecheck check migrate validate-migrations seed reset-db eval clean
 
 SHELL := /bin/bash
 
@@ -62,6 +62,9 @@ check: lint format typecheck ## Run lint + format + typecheck
 
 migrate: ## Run pending database migrations
 	$(VENV_BIN)/alembic upgrade head
+
+validate-migrations: ## Validate migrations apply cleanly and match the models
+	bash scripts/validate_migrations.sh
 
 seed: ## Re-seed the database with sample data
 	$(PYTHON) scripts/seed_db.py
