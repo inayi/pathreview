@@ -78,7 +78,7 @@ Local venv is Python 3.14 while the project targets 3.11, so dependency install 
 
 ### Check-in 2 (end of week)
 
-**PR link:** [to be added when the PR is opened]
+**PR link:** https://github.com/ascherj/pathreview/pull/363
 
 **Branch:** `feat/129-validate-database-migrations`
 
