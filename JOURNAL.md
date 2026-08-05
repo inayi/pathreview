@@ -93,3 +93,36 @@ Added `tests/unit/test_migrations.py`. It covers migration-chain integrity witho
 > Documented pre-existing failures: the local dev environment runs Python 3.14 while the project targets 3.11 (`make check` mypy rejects numpy's 3.12+ stubs; ruff/black and 53 unit tests fail in modules unrelated to this change). My changes introduce **no new failures** — baseline without my test file is `53 failed / 375 passed`; with it, `53 failed / 383 passed` (my 8 new tests pass). My added/changed files pass `ruff` and `black` cleanly. CI runs on Python 3.11, where these pre-existing issues do not occur.
 
 **Draft PR feedback received from:** none
+
+## Week 10 — Iteration & reflection
+
+### Reviewer feedback
+
+**Feedback received:** [ ] Yes  [x] No — still awaiting review
+
+**Summary of feedback:**
+[What did reviewers comment on? Or note that no review came in.]
+
+**How you responded:**
+[What changes did you make, or what did you reply? If no feedback,
+leave blank.]
+
+---
+
+### Reflection
+
+**What was harder than you expected?**
+- Navigating an unfamiliar production codebase to isolate the exact root cause behind database migration and schema validation failures was more challenging than anticipated. Tracing how Alembic migrations interact asynchronously with SQLAlchemy models and discovering that Alembic's Python package path was shadowed locally required deep debugging rather than just straightforward code reading.
+
+**What did you learn about working in a large codebase?**
+- When contributing to an existing codebase vs. building a project from scratch, you cannot rely on mental models or assumptions. You must actively reverse engineer system behavior—such as step-debugging environment scripts or writing reproduction cases—to verify root causes. Validating changes safely requires confirming that fixes address edge cases without introducing regressions to unrelated modules or existing workflows.
+
+**How did AI tools help — and where did they fall short?**
+- AI tools were highly effective for high-level architectural mapping, summarizing file roles, and drafting initial boilerplate syntax. However, they fell short when handling subtle environment dependencies—such as async driver configurations (postgresql+asyncpg://) or isolated container testing. AI-generated code required strict human verification to catch subtle hallucinations, syntax misconfigurations, and static test anti-patterns.
+
+**What would you do differently if you started over?**
+- If starting over, I would select an issue targeting application or business logic rather than infrastructure/migration tooling. CI database migration testing relies heavily on mimicking production-like state, isolated service containers, and runtime schema diffing. A feature or bug-fix issue would have allowed more direct iteration on unit test behavior without spending significant cycles setting up containerized DB environments.
+
+**What are you most proud of from this module?**
+- I am most proud of executing a complete, professional open-source contribution workflow end-to-end. From reproducing the initial issue with a failing test case and detailing a solution plan to configuring a robust CI validation pipeline with dockerized testing and writing a clean PR description, I demonstrated how to deliver production-grade infrastructure changes with high rigor.
+
